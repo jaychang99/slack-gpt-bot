@@ -9,6 +9,9 @@ from openai import OpenAI, OpenAIError
 load_dotenv()
 
 DEFAULT_SYSTEM_INSTRUCTIONS = "You are a helpful assistant inside Slack. Keep responses helpful but concise."
+DEFAILT_OPENAI_MODEL = "gpt-5-nano"
+DEFAULT_OPENAI_REASONING_EFFORT = "low"
+DEFAULT_CONTEXT_WINDOW = 10
 
 # Env vars
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
@@ -16,6 +19,9 @@ SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
 SLACK_BOT_USER_ID = os.getenv("SLACK_BOT_USER_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SLACK_CUSTOM_INSTRUCTIONS = os.getenv("SLACK_CUSTOM_INSTRUCTIONS", DEFAULT_SYSTEM_INSTRUCTIONS)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", DEFAILT_OPENAI_MODEL)
+OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT)
+OPENAI_CONTEXT_WINDOW = int(os.getenv("OPENAI_CONTEXT_WINDOW", DEFAULT_CONTEXT_WINDOW))
 
 # Init Slack + OpenAI clients
 app = App(token=SLACK_BOT_TOKEN)
@@ -31,7 +37,7 @@ def handle_mentions(body, say):
 
     try:
         # Get last 10 messages from thread
-        history = slack_client.conversations_replies(channel=channel, ts=thread_ts).get("messages", [])[-10:]
+        history = slack_client.conversations_replies(channel=channel, ts=thread_ts).get("messages", [])[-OPENAI_CONTEXT_WINDOW:]
 
         # Build message history for OpenAI
         messages = [{"role": "system", "content": SLACK_CUSTOM_INSTRUCTIONS}]
@@ -41,9 +47,9 @@ def handle_mentions(body, say):
             messages.append({"role": sender, "content": text})
 
         response = openai_client.chat.completions.create(
-            model="gpt-5-nano",
+            model=OPENAI_MODEL,
             messages=messages,
-            reasoning_effort="low", # 추론 노력 (응답 시간과 비례할듯)
+            # reasoning_effort=OPENAI_REASONING_EFFORT, # 추론 노력 (응답 시간과 비례할듯) # GPT-4o-mini-search-preview 모델에서 지원 안함
         )
 
         say(text=response.choices[0].message.content.strip(), thread_ts=thread_ts)
