@@ -9,9 +9,11 @@ from openai import OpenAI, OpenAIError
 load_dotenv()
 
 DEFAULT_SYSTEM_INSTRUCTIONS = "You are a helpful assistant inside Slack. Keep responses helpful but concise."
-DEFAILT_OPENAI_MODEL = "gpt-5-nano"
+DEFAULT_OPENAI_MODEL = "gpt-5-nano"
+DEFAULT_OPENAI_SEARCH_MODEL = "gpt-4o-mini-search-preview"
 DEFAULT_OPENAI_REASONING_EFFORT = "low"
 DEFAULT_CONTEXT_WINDOW = 10
+DEFAULT_OPENAI_SEARCH_REQUIRED_IDENTIFIER = "SLACK_BOT_WEB_SEARCH_REQUIRED"
 
 # Env vars
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
@@ -19,9 +21,11 @@ SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
 SLACK_BOT_USER_ID = os.getenv("SLACK_BOT_USER_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SLACK_CUSTOM_INSTRUCTIONS = os.getenv("SLACK_CUSTOM_INSTRUCTIONS", DEFAULT_SYSTEM_INSTRUCTIONS)
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", DEFAILT_OPENAI_MODEL)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
+OPENAI_SEARCH_MODEL = os.getenv("OPENAI_SEARCH_MODEL", DEFAULT_OPENAI_SEARCH_MODEL)
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT)
 OPENAI_CONTEXT_WINDOW = int(os.getenv("OPENAI_CONTEXT_WINDOW", DEFAULT_CONTEXT_WINDOW))
+OPENAI_SEARCH_REQUIRED_IDENTIFIER = os.getenv("OPENAI_SEARCH_REQUIRED_IDENTIFIER", DEFAULT_OPENAI_SEARCH_REQUIRED_IDENTIFIER)
 
 # Init Slack + OpenAI clients
 app = App(token=SLACK_BOT_TOKEN)
@@ -49,8 +53,19 @@ def handle_mentions(body, say):
         response = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
-            # reasoning_effort=OPENAI_REASONING_EFFORT, # 추론 노력 (응답 시간과 비례할듯) # GPT-4o-mini-search-preview 모델에서 지원 안함
+            reasoning_effort=OPENAI_REASONING_EFFORT, # 추론 노력 (응답 시간과 비례할듯) # GPT-4o-mini-search-preview 모델에서 지원 안함
         )
+        
+        if OPENAI_SEARCH_REQUIRED_IDENTIFIER in response.choices[0].message.content:
+            # If search is required, use the search model
+            response = openai_client.chat.completions.create(
+                model=OPENAI_SEARCH_MODEL,
+                messages=messages,
+            )
+            
+            # add (Used web search) to the end of the response
+            response.choices[0].message.content += "\n\n🌐 (Used web search)"
+            
 
         say(text=response.choices[0].message.content.strip(), thread_ts=thread_ts)
 
