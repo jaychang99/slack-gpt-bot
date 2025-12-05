@@ -1,66 +1,85 @@
 import os
+from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from openai import OpenAI
-from dotenv import load_dotenv
 from slack_sdk import WebClient
-from openai import OpenAIError
+from openai import OpenAI, OpenAIError
 
+# Load environment variables
 load_dotenv()
-# Slack WebClient for fetching thread history
-slack_client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
-bot_user_id = os.getenv("SLACK_BOT_USER_ID")  # <-- Add this to your .env file
 
+DEFAULT_SYSTEM_INSTRUCTIONS = "You are a helpful assistant inside Slack. Keep responses helpful but concise."
 
-# Init OpenAI client (v1+)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Env vars
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
+SLACK_BOT_USER_ID = os.getenv("SLACK_BOT_USER_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SLACK_CUSTOM_INSTRUCTIONS = os.getenv("SLACK_CUSTOM_INSTRUCTIONS", DEFAULT_SYSTEM_INSTRUCTIONS)
 
-# Init Slack app
-app = App(token=os.getenv("SLACK_BOT_TOKEN"))
+# Init Slack + OpenAI clients
+app = App(token=SLACK_BOT_TOKEN)
+slack_client = WebClient(token=SLACK_BOT_TOKEN)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
 
 @app.event("app_mention")
-def handle_mention_events(body, say):
+def handle_mentions(body, say):
     event = body["event"]
     channel = event["channel"]
     thread_ts = event.get("thread_ts", event["ts"])
 
     try:
-        # Fetch thread messages
-        history = slack_client.conversations_replies(channel=channel, ts=thread_ts).get("messages", [])
+        # Get last 10 messages from thread
+        history = slack_client.conversations_replies(channel=channel, ts=thread_ts).get("messages", [])[-10:]
 
-        # Only keep the last 10
-        history = history[-10:]
-
-        # Format for OpenAI
-        messages = [{"role": "system", "content": "You are a helpful assistant inside a Slack thread."}]
+        # Build message history for OpenAI
+        messages = [{"role": "system", "content": SLACK_CUSTOM_INSTRUCTIONS}]
         for msg in history:
             text = msg.get("text", "")
-            user_id = msg.get("user")
+            sender = "assistant" if msg.get("user") == SLACK_BOT_USER_ID else "user"
+            messages.append({"role": sender, "content": text})
 
-            if user_id == bot_user_id:
-                role = "assistant"
-            else:
-                role = "user"
+        response = openai_client.chat.completions.create(
+            model="gpt-5-nano",
+            messages=messages,
+            reasoning_effort="low", # 추론 노력 (응답 시간과 비례할듯)
+        )
 
-            messages.append({
-                "role": role,
-                "content": text
-            })
+        say(text=response.choices[0].message.content.strip(), thread_ts=thread_ts)
 
-        # Send to OpenAI
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+    except Exception as e:
+        say(text=f"⚠️ Error: {str(e)}", thread_ts=thread_ts)
+
+
+@app.event("message")
+def handle_dms(body, say, event):
+    channel_type = event.get("channel_type")
+    user = event.get("user")
+    text = event.get("text", "")
+    thread_ts = event.get("thread_ts", event.get("ts"))
+
+    # Only respond to DMs (channel_type = "im") and not ourself
+    if channel_type != "im" or user == SLACK_BOT_USER_ID:
+        return
+
+    try:
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant inside Slack DMs. Keep responses helpful but concise."},
+            {"role": "user", "content": text}
+        ]
+
+        response = openai_client.chat.completions.create(
+            model="gpt-5-mini",
             messages=messages
         )
 
-        reply = response.choices[0].message.content.strip()
-        say(text=reply, thread_ts=thread_ts)
+        say(text=response.choices[0].message.content.strip(), thread_ts=thread_ts)
 
-    except OpenAIError as e:
-        say(text="⚠️ GPT is unavailable. Possibly due to usage limits.", thread_ts=thread_ts)
     except Exception as e:
-        say(text=f"⚠️ Unexpected error: {str(e)}", thread_ts=thread_ts)
+        say(text=f"⚠️ Error: {str(e)}", thread_ts=thread_ts)
+
 
 if __name__ == "__main__":
-    handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
+    handler = SocketModeHandler(app, SLACK_APP_TOKEN)
     handler.start()
