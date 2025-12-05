@@ -52,32 +52,6 @@ def handle_mentions(body, say):
         say(text=f"⚠️ Error: {str(e)}", thread_ts=thread_ts)
 
 
-@app.event("message")
-def handle_dms(body, say, event):
-    channel_type = event.get("channel_type")
-    user = event.get("user")
-    text = event.get("text", "")
-    thread_ts = event.get("thread_ts", event.get("ts"))
-
-    # Only respond to DMs (channel_type = "im") and not ourself
-    if channel_type != "im" or user == SLACK_BOT_USER_ID:
-        return
-
-    try:
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant inside Slack DMs. Keep responses helpful but concise."},
-            {"role": "user", "content": text}
-        ]
-
-        response = openai_client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=messages
-        )
-
-        say(text=response.choices[0].message.content.strip(), thread_ts=thread_ts)
-
-    except Exception as e:
-        say(text=f"⚠️ Error: {str(e)}", thread_ts=thread_ts)
 
 
 if __name__ == "__main__":
